@@ -6,6 +6,7 @@
 // @author        Ameba Blog User
 // @match        https://blog.ameba.jp/ucs/entry/srventrylist*
 // @run-at        document-start
+// @grant        none
 // @updateURL        https://github.com/personwritep/Every_Page_Snap/raw/main/Every_Page_Snap.user.js
 // @downloadURL        https://github.com/personwritep/Every_Page_Snap/raw/main/Every_Page_Snap.user.js
 // ==/UserScript==
