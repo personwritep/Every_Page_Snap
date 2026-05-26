@@ -1,0 +1,332 @@
+// ==UserScript==
+// @name         Every Page Snap 💢
+// @namespace  http://tampermonkey.net/
+// @version       2.4
+// @description  「記事の編集・削除」ページで全記事の「公開設定」を記録する
+// @author        Ameba Blog User
+// @match        https://blog.ameba.jp/ucs/entry/srventrylist*
+// @run-at        document-start
+// ==/UserScript==
+
+
+window.addEventListener('DOMContentLoaded', function(){ // CSSデザインを適用するためのスクリプト
+    let css=[
+        'html { overflow-y: overlay !important }',
+        'body { animation: fadeIn 0.2s ease 0s 1 normal }',
+        '@keyframes fadeIn { 0% {opacity: 0} 100% {opacity: 1}}',
+        '#globalHeader, #ucsHeader, #ucsMainLeft h1, .l-ucs-sidemenu-area, #ucsMainRight,',
+        '#entryList dl, #entryList .deleteCol, #entryList .rightCol input, .actionControl,',
+        '#footerAd, #globalFooter, .checkboxAllControl { display: none }',
+
+        '#ucsContent{ width: 840px; box-shadow: 0 0 0 100vh #c5d8e1 }',
+        '#ucsMain{ background: #fff } #ucsMainLeft { width: 810px; float: none }',
+
+        '#entryList li{ height: 18px; padding: 6px 5px !important }',
+        '#entryList li:hover{ background-color: #e2eef0 }',
+        '#entryList .leftCol, #entryList .titleCol h2{ width: 560px }',
+        '.leftCol a:hover{ text-decoration: none } .leftCol a:visited{ color: #3970b5 }',
+        '#entryList .rightCol{ width: 225px }',
+
+        '#entryList .txtCol .date{ font-size: 13px; color: #000 }',
+        '#entryList .txtCol{ white-space: nowrap; font-size: 13px; margin-top: 2px; line-height: 16px }',
+
+        '#entryList ul input[value="1"] + input + li .txtCol span:first-child{ display: inline-block;',
+        'margin-top: -2px; padding: 2px 13px 0; color: #fff; background: #2196f3 !important }',
+        '#entryList ul input[value="2"] + input + li .txtCol span:first-child{ display: inline-block;',
+        'width: 3em; text-indent: -1em; overflow: hidden; margin-top: -2px; padding: 2px 13px 0;',
+        'vertical-align: -4px; color: #fff; background: #009688 !important }',
+
+        '#entryMonth { font-size: 14px; overflow: visible; margin-top: 3px }',
+        '#entryMonth li, #entryMonth #nowMonthLi { padding: 2px 10px 0 }',
+        '#nowMonth { padding: 1px 6px 0; border: none; border-radius: 1px;',
+        'box-shadow: 0 0 0 2px #0066cc; color: #000 }',
+        '#entryListEdit form { display: flex; flex-direction: column } #entrySort { order: -2 }',
+        '.pagingArea { order: -1; padding: 4px; margin-bottom: -33px; background: #ddedf3 }',
+        '.pagingArea a { border: 1px solid #888 } .pagingArea .active{ border: 2px solid #0066cc }',
+        '.pagingArea a, .pagingArea .active, .pagingArea .disabled { font-size: 14px; line-height: 23px }',
+        '#sorting { margin: 38px 0 4px; padding: 4px 10px; height: 110px; background: #ddedf3 }',
+        '#sorting select, #sorting ul { display: none }',
+        'input { font-family: meiryo; font-size: 14px }'].join(' ');
+
+    let style=document.createElement('style');
+    style.insertAdjacentHTML('afterbegin', css);
+    document.documentElement.appendChild(style);
+})
+
+
+
+window.addEventListener('load', function(){
+    'use strict';
+
+    let drive_mode;
+    let blogDB={}; //「アメンバー公開」の記事IDリスト
+    let entry_id;
+    let entry_id_DB;
+    let publish_f;
+    let pub_all;
+    let pub_dra;
+    let pub_ame;
+
+    let ua=0;
+    let agent=window.navigator.userAgent.toLowerCase();
+    if(agent.indexOf('firefox') > -1){ ua=1; } // Firefoxの場合のフラグ
+    if(agent.indexOf('edge') > -1){ ua=2; } // Edgeの場合のフラグ
+
+    let read_json=localStorage.getItem('blogDB_back'); // ローカルストレージ 保存名
+    blogDB=JSON.parse(read_json);
+    if(blogDB==null){
+        blogDB=[['00000000000', 's']]; }
+
+    drive_mode=blogDB[0][1]; // 起動時に動作フラグを取得
+    if(drive_mode==0){ drive_mode='s'; } // 旧ファイルの救済
+
+    reg_set();
+
+    function reg_set(){
+        let k;
+        entry_id_DB=[]; // リセット
+        pub_all=0;
+        pub_dra=0;
+        pub_ame=0;
+
+        for(k=0; k<blogDB.length; k++){
+            entry_id_DB[k]=blogDB[k][0]; // ID検索用の配列を作成
+            if(blogDB[k][1]=='0'){
+                pub_all +=1; continue; }
+            if(blogDB[k][1]=='1'){
+                pub_dra +=1; continue; }
+            if(blogDB[k][1]=='2'){
+                pub_ame +=1; continue; }}}
+
+    control_pannel(drive_mode);
+
+    function control_pannel(d){
+        let sty;
+        let insert_div0;
+        insert_div0=document.createElement('div');
+        insert_div0.setAttribute('id', 'div0');
+        insert_div0.style='color: #333; font-size: 14px; margin: 10px -10px 0 15px';
+        let box=document.querySelector('#sorting');
+        box.appendChild(insert_div0);
+
+        let insert_div1;
+        insert_div1=document.createElement('div');
+        insert_div1.setAttribute('id', 'div1');
+        insert_div1.style='color: #000; font-size: 14px; margin: 8px 15px; border: 1px solid #888';
+        box.appendChild(insert_div1);
+
+        let button1=document.createElement('input');
+        button1.setAttribute('id', 'list_snap');
+        button1.setAttribute('type', 'submit');
+        button1.setAttribute('style', 'padding: 2px 0 0; margin: 7px 40px 7px 0; width: 210px');
+        insert_div0.appendChild(button1);
+
+        if(d=='s'){
+            button1.setAttribute('value', '公開設定のSNAP開始　▶');
+            button1.onclick=function(e){
+                e.preventDefault();
+                start(); }
+
+            function start(){
+                let conf_str=['　　 🔴　このページ以降の記事に関して 「公開設定」を記録します',
+                              '\n　　　　  連続動作はコントロール部にマウスに乗せると停止します'].join(' ');
+                let ok=confirm(conf_str);
+                if(ok){
+                    blogDB[0][1]='c'; // 連続動作フラグをセット
+                    let write_json=JSON.stringify(blogDB);
+                    localStorage.setItem('blogDB_back', write_json); // ローカルストレージ 保存
+                    next(); }}}
+        else if(d=='c'){ // 「c」は連続動作
+            button1.setAttribute('value', '　　　SNAPを停止　　❚❚');
+            button1.style.pointerEvents='none';
+            button1.style.width='760px';
+            box.addEventListener('mouseover', function(e){
+                e.preventDefault();
+                box.setAttribute('style', 'background: #96b6d2');
+                stop(); }, false);
+
+            function stop(){
+                blogDB[0][1]='s'; // 連続動作フラグをリセット
+                let write_json=JSON.stringify(blogDB);
+                localStorage.setItem('blogDB_back', write_json); } // ローカルストレージ 保存
+            setTimeout(next, 400); } // 連続実行のぺージ遷移のタイミング 0.4sec ⭕
+
+        else if(d=='e'){ // 「e」は終了
+            button1.setAttribute('value', 'SNAPが終了しました');
+            button1.style.pointerEvents='none';
+            box.addEventListener('mouseover', function(e){
+                e.preventDefault();
+                box.setAttribute('style', 'background: #ddedf3'); }, false); }
+
+        if(d=='s' || d=='e'){ // 動作モードが「c」の場合はボタンを作らない
+            let button2=document.createElement('input');
+            button2.setAttribute('id', 'reset');
+            button2.setAttribute('type', 'submit');
+            button2.setAttribute('value', '初期化');
+            button2.setAttribute('style', 'padding: 2px 0 0; margin-right: 20px; width: 60px');
+            insert_div0.appendChild(button2);
+
+            button2.onclick=function(e){
+                e.preventDefault();
+                blogDB=[['00000000000', 's']];
+                let write_json=JSON.stringify(blogDB);
+                localStorage.setItem('blogDB_back', write_json); // ローカルストレージ保存
+                snap_disp();
+                document.querySelector('#reset').value='〔　〕'; }
+
+            let button3=document.createElement('input');
+            button3.setAttribute('type', 'submit');
+            button3.setAttribute('value', 'SNAPをファイル保存');
+            button3.setAttribute('style', 'padding: 2px 0 0; margin: 7px 10px 7px 0; width: 150px');
+            insert_div0.appendChild(button3);
+
+            button3.onclick=function(e){
+                e.preventDefault();
+                let write_json=JSON.stringify(blogDB);
+                let blob=new Blob([write_json], {type: 'application/json'});
+                if(ua==2){
+                    window.navigator.msSaveBlob(blob, 'blogDB.json'); } // 保存ファイル名
+                else{
+                    let a_elem=document.createElement('a');
+                    a_elem.href=URL.createObjectURL(blob);
+                    a_elem.download='blogDB.json'; // 保存ファイル名
+                    if(ua==1){
+                        a_elem.target='_blank';
+                        document.body.appendChild(a_elem); }
+                    a_elem.click();
+                    if(ua==1){
+                        document.body.removeChild(a_elem); }
+                    URL.revokeObjectURL(a_elem.href); }}
+
+            let button4=document.createElement('input');
+            button4.setAttribute('type', 'file');
+            button4.setAttribute('style', 'vertical-align: 1px; width: 285px');
+            if(ua==2){
+                button4.setAttribute('style', 'vertical-align: 0; width: 270px; direction: rtl'); }
+            insert_div0.appendChild(button4);
+
+            button4.addEventListener("change", function(){
+                if(!(button4.value)) return; // ファイルが選択されない場合
+                let file_list=button4.files;
+                if(!file_list) return; // ファイルリストが選択されない場合
+                let file=file_list[0];
+                if(!file) return; // ファイルが無い場合
+
+                let file_reader=new FileReader();
+                file_reader.readAsText(file);
+                file_reader.onload=function(){
+                    if(file_reader.result.slice(0, 15)=='[["00000000000"'){ // blogDB.jsonの確認
+                        let data_in=JSON.parse(file_reader.result);
+                        blogDB=data_in; // 読込み上書き処理
+                        let write_json=JSON.stringify(blogDB);
+                        localStorage.setItem('blogDB_back', write_json); // ローカルストレージ 保存
+                        button2.setAttribute('value', '初期化'); // 初期化後なら読み込んだ事を示す
+                        snap_disp(); }
+                    else{
+                        alert("   ⛔ 不適合なファイルです  blogDB(n).json ファイルを選択してください");}};});}
+
+        let span5=document.createElement('span');
+        span5.setAttribute('id', 'snap_result');
+        span5.style='display: inline-block; margin: 6px 12px 4px';
+        insert_div1.appendChild(span5);
+        snap_disp(); }
+
+
+    function snap_disp(){
+        reg_set();
+        let span5=document.querySelector('#snap_result');
+        span5.textContent='　記録件数：' + (blogDB.length -1) + '　　全員に公開：' + pub_all +
+            '　　アメンバー限定公開：' + pub_ame + '　　下書き：' + pub_dra; }
+
+
+    function next(){
+        let win_url;
+        let current;
+        let pageid;
+        let next_url;
+        let pager;
+        let end;
+
+        entry_id=document.querySelectorAll('input[name="entry_id"]');
+        if(entry_id.length >0){
+            snap(); } // 投稿記事がある場合SNAPを実行 無ければスルーする
+
+        win_url=window.location.search.substring(1,window.location.search.length);
+        current=win_url.slice(-6);
+
+        if(win_url.indexOf('pageID') ==-1){ // pageIDが無い 月のトップページの場合
+            pager=document.querySelector('.pagingArea');
+            if(pager){ // ページャーが有りその末尾でなければ同月次ページへ
+                next_url=['https://blog.ameba.jp/ucs/entry/srventrylist.do?',
+                          'pageID=2&entry_ym=' + current].join('');
+                window.open( next_url, '_self'); }
+            else{ // ページャーが無ければ次月トップページへ
+                current=make_next(current);
+                if(current!=0){ // 現在を越えないなら次月へ
+                    next_url=['https://blog.ameba.jp/ucs/entry/srventrylist.do?',
+                              'entry_ym=' + current].join('');
+                    window.open( next_url, '_self'); }
+                else{ // 現在を越えたら0が戻り停止
+                    when_edge(); }}}
+
+        else{ // pageIDを含み 月のトップページでない場合
+            end=document.querySelector('.pagingArea .disabled.next');
+            if(!end){ // ページャーの末尾でなければ同月次ページへ
+                pageid=parseInt(win_url.slice(7).slice(0, -16), 10) +1;
+                next_url=['https://blog.ameba.jp/ucs/entry/srventrylist.do?',
+                          'pageID=' + pageid + '&entry_ym=' + current].join('');
+                window.open( next_url, '_self'); }
+            else{ // ページャーの末尾なら次月トップページへ
+                current=make_next(current);
+                if(current!=0){ // 現在を越えないなら次月へ
+                    next_url=['https://blog.ameba.jp/ucs/entry/srventrylist.do?',
+                              'entry_ym=' + current].join('');
+                    window.open( next_url, '_self'); }
+                else{ // 現在を越えたら0が戻り停止
+                    when_edge(); }}}
+
+        function make_next(curr){
+            let ym;
+            let y;
+            let m;
+            ym=parseInt(curr, 10); // 10進数値化
+            y=Math.floor(ym/100); // 年は100で割った商
+            m=ym % 100; // 月は100で割った余り
+            if(m !=12){
+                ym=100*y + m +1; }
+            else{
+                ym=100*y + 101; }
+
+            let now=new Date();
+            if(ym > 100*now.getFullYear() + now.getMonth() +1){
+                return 0; } // 現在の月を越える場合は0を返す
+            else{
+                return ym; }} // 次年月の数値を返す
+
+        function when_edge(){
+            blogDB[0][1]='s'; // 連続動作フラグをリセット
+            let write_json=JSON.stringify(blogDB);
+            localStorage.setItem('blogDB_back', write_json); // ローカルストレージ保存
+            document.querySelector('#div0').remove();
+            document.querySelector('#div1').remove();
+            control_pannel('e'); }} // SNAP終了時の表示をさせる
+
+
+    function snap(){ // ページ内の「公開設定」をSNAPする
+        let k;
+        entry_id=document.querySelectorAll('input[name="entry_id"]');
+        publish_f=document.querySelectorAll('input[name="publish_flg"]');
+
+        for(k=0; k< entry_id.length; k++){
+            let index=entry_id_DB.indexOf(entry_id[k].value);
+            if(index==-1){ // IDがblogDBに記録されていない場合
+                blogDB.push([entry_id[k].value, publish_f[k].value]); } // 公開設定の登録を追加
+            else{ // IDがblogDBに記録されていた場合
+                blogDB[index]=[entry_id[k].value, publish_f[k].value]; }} // 公開設定の登録を更新
+        setTimeout(write_local, 10);
+
+        function write_local(){
+            let write_json=JSON.stringify(blogDB);
+            localStorage.setItem('blogDB_back', write_json); }} // ローカルストレージ保存
+
+})
